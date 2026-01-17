@@ -3,9 +3,11 @@ require("dotenv").config();
 const { REST, Routes, SlashCommandBuilder } = require("discord.js");
 
 const commands = [
+  /*
   new SlashCommandBuilder()
     .setName("ping")
     .setDescription("Replies with Pong"),
+  */
 
   new SlashCommandBuilder()
     .setName("setchess")
@@ -22,12 +24,8 @@ const commands = [
     .setDescription("Show your saved Chess.com username"),
 
   new SlashCommandBuilder()
-    .setName("chesslist")
-    .setDescription("List all registered Chess.com players"),
-
-  new SlashCommandBuilder()
     .setName("leaderboard")
-    .setDescription("Refresh or Show the Rapid Chess.com leaderboard"),
+    .setDescription("Refresh or show the Rapid Chess.com leaderboard"),
 ].map((cmd) => cmd.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
@@ -43,8 +41,6 @@ const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
 
     const guildId = process.env.GUILD_ID;
 
-    // If you set GUILD_ID in .env, commands appear almost instantly in that server
-    // If not, it falls back to global commands which can take a while to show up
     const route = guildId
       ? Routes.applicationGuildCommands(appId, guildId)
       : Routes.applicationCommands(appId);

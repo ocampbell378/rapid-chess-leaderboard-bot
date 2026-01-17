@@ -66,9 +66,10 @@ async function getRapidRating(username) {
     if (!res.ok) return null;
 
     const data = await res.json();
-    const rating = typeof data?.chess_rapid?.last?.rating === "number"
-      ? data.chess_rapid.last.rating
-      : null;
+    const rating =
+      typeof data?.chess_rapid?.last?.rating === "number"
+        ? data.chess_rapid.last.rating
+        : null;
 
     rapidCache.set(norm, { rating, ts: now });
     return rating;
@@ -84,14 +85,23 @@ function medal(i) {
   return "▫️";
 }
 
-function formatDelta(delta) {
+function formatEloDelta(delta) {
   if (typeof delta !== "number" || delta === 0) return "";
   return delta > 0 ? `⬆️ +${delta}` : `⬇️ ${delta}`;
 }
 
+function formatRankMove(move) {
+  if (typeof move !== "number" || move === 0) return "";
+  return move > 0 ? `⬆️${move}` : `⬇️${Math.abs(move)}`;
+}
+
+function formatWeeklyDelta(delta) {
+  if (typeof delta !== "number" || delta === 0) return "";
+  return delta > 0 ? `wk +${delta}` : `wk ${delta}`;
+}
+
 function buildLeaderboardEmbed(rows) {
   const embed = new EmbedBuilder()
-    .setTitle("Rapid Chess.com leaderboard")
     .setFooter({ text: "Data from Chess.com public API" });
 
   if (!rows.length) {
@@ -101,8 +111,14 @@ function buildLeaderboardEmbed(rows) {
 
   const lines = rows.map((r, i) => {
     const ratingText = r.rating ?? "unrated";
-    const deltaText = r.deltaText ? ` · ${r.deltaText}` : "";
-    return `${medal(i)} **${r.discordTag}** -> ${r.chessUsername} (**${ratingText}**)${deltaText}`;
+
+    const parts = [];
+    if (r.rankMoveText) parts.push(r.rankMoveText);
+    if (r.eloDeltaText) parts.push(r.eloDeltaText);
+    if (r.weeklyDeltaText) parts.push(r.weeklyDeltaText);
+
+    const suffix = parts.length ? ` · ${parts.join(" · ")}` : "";
+    return `${medal(i)} **${r.discordTag}** -> ${r.chessUsername} (**${ratingText}**)${suffix}`;
   });
 
   embed.setDescription(lines.join("\n").slice(0, 3800));
@@ -124,13 +140,16 @@ async function getOrCreateLeaderboardMessage(client, channelId) {
   return msg;
 }
 
-async function refreshLeaderboardMessage(client, channelId) {
+async function refreshLeaderboardMessage(client, channelId, opts = {}) {
   const msg = await getOrCreateLeaderboardMessage(client, channelId);
   if (!msg) return false;
 
   const players = loadPlayers();
   const state = loadState();
-  const prev = state.lastRatings || {};
+
+  const prevRatings = state.lastRatings || {};
+  const weeklyBaseline = state.weeklyBaselineRatings || {};
+  const prevRanks = state.lastRanks || {}; // norm -> rank (1-based)
 
   const rowsBase = await Promise.all(
     Object.entries(players).map(async ([id, p]) => ({
@@ -140,29 +159,79 @@ async function refreshLeaderboardMessage(client, channelId) {
     }))
   );
 
-  rowsBase.sort((a, b) => (b.rating ?? -1) - (a.rating ?? -1));
+  rowsBase.sort((a, b) => {
+    const ar = a.rating;
+    const br = b.rating;
+
+    if (ar === null && br === null) return a.discordTag.localeCompare(b.discordTag);
+    if (ar === null) return 1;
+    if (br === null) return -1;
+    if (br !== ar) return br - ar;
+    return a.discordTag.localeCompare(b.discordTag);
+  });
+
+  const currentRanks = {};
+  for (let i = 0; i < rowsBase.length; i++) {
+    const norm = normalizeUsername(rowsBase[i].chessUsername);
+    if (norm) currentRanks[norm] = i + 1;
+  }
 
   const rows = rowsBase.map((r) => {
     const norm = normalizeUsername(r.chessUsername);
-    const prevRating = prev[norm];
-    const delta =
+
+    const prevRating = prevRatings[norm];
+    const eloDelta =
       typeof r.rating === "number" && typeof prevRating === "number"
         ? r.rating - prevRating
         : null;
 
-    return { ...r, deltaText: formatDelta(delta) };
+    const prevRank = prevRanks[norm];
+    const currRank = currentRanks[norm];
+    const rankMove =
+      typeof prevRank === "number" && typeof currRank === "number"
+        ? prevRank - currRank
+        : null;
+
+    const weeklyBase = weeklyBaseline[norm];
+    const weeklyDelta =
+      typeof r.rating === "number" && typeof weeklyBase === "number"
+        ? r.rating - weeklyBase
+        : null;
+
+    return {
+      ...r,
+      rankMoveText: formatRankMove(rankMove),
+      eloDeltaText: formatEloDelta(eloDelta),
+      weeklyDeltaText: formatWeeklyDelta(weeklyDelta),
+    };
   });
 
-  await msg.edit({ content: "", embeds: [buildLeaderboardEmbed(rows)] });
-
   const nextRatings = {};
-  for (const r of rows) {
-    if (typeof r.rating === "number") {
-      nextRatings[normalizeUsername(r.chessUsername)] = r.rating;
-    }
+  const nextRanks = {};
+  for (let i = 0; i < rowsBase.length; i++) {
+    const norm = normalizeUsername(rowsBase[i].chessUsername);
+    const rating = rowsBase[i].rating;
+
+    if (norm) nextRanks[norm] = i + 1;
+    if (norm && typeof rating === "number") nextRatings[norm] = rating;
   }
 
-  saveState({ ...state, channelId, messageId: msg.id, lastRatings: nextRatings });
+  const nextState = {
+    ...state,
+    channelId,
+    messageId: msg.id,
+    lastRatings: nextRatings,
+    lastRanks: nextRanks,
+  };
+
+  if (opts.setWeeklyBaseline) {
+    nextState.weeklyBaselineRatings = nextRatings;
+    nextState.weeklyBaselineAt = new Date().toISOString();
+  }
+
+  await msg.edit({ content: "", embeds: [buildLeaderboardEmbed(rows)] });
+  saveState(nextState);
+
   return true;
 }
 
@@ -188,18 +257,19 @@ client.once("ready", () => {
 
 cron.schedule(
   "0 19 * * 1",
-  () => refreshLeaderboardMessage(client, LEADERBOARD_CHANNEL_ID),
+  () => refreshLeaderboardMessage(client, LEADERBOARD_CHANNEL_ID, { setWeeklyBaseline: true }),
   { timezone: "America/Chicago" }
 );
 
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
-  const players = loadPlayers();
-
   if (interaction.commandName === "leaderboard") {
     if (!checkAndSetCooldown(interaction.user.id)) {
-      await interaction.reply({ content: "Leaderboard is refreshing. Try again shortly.", ephemeral: true });
+      await interaction.reply({
+        content: "Leaderboard is refreshing. Try again shortly.",
+        ephemeral: true,
+      });
       return;
     }
 
