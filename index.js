@@ -101,8 +101,9 @@ function formatWeeklyDelta(delta) {
 }
 
 function buildLeaderboardEmbed(rows) {
-  const embed = new EmbedBuilder()
-    .setFooter({ text: "Data from Chess.com public API" });
+  const embed = new EmbedBuilder().setFooter({
+    text: "Data from Chess.com public API",
+  });
 
   if (!rows.length) {
     embed.setDescription("No one is registered yet. Use `/setchess <username>`.");
@@ -257,12 +258,65 @@ client.once("ready", () => {
 
 cron.schedule(
   "0 19 * * 1",
-  () => refreshLeaderboardMessage(client, LEADERBOARD_CHANNEL_ID, { setWeeklyBaseline: true }),
+  () =>
+    refreshLeaderboardMessage(client, LEADERBOARD_CHANNEL_ID, {
+      setWeeklyBaseline: true,
+    }),
   { timezone: "America/Chicago" }
 );
 
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
+
+  if (interaction.commandName === "setchess") {
+    const username = interaction.options.getString("username", true).trim();
+    const norm = normalizeUsername(username);
+
+    if (!norm) {
+      await interaction.reply({
+        content: "Please provide a valid Chess.com username.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const players = loadPlayers();
+    players[interaction.user.id] = {
+      discordTag: interaction.user.tag,
+      chessUsername: username,
+    };
+    savePlayers(players);
+
+    await interaction.reply({
+      content: `Saved: **${interaction.user.tag}** -> **${username}**`,
+      ephemeral: true,
+    });
+
+    await refreshLeaderboardMessage(
+      client,
+      LEADERBOARD_CHANNEL_ID || interaction.channelId
+    ).catch(() => {});
+    return;
+  }
+
+  if (interaction.commandName === "mychess") {
+    const players = loadPlayers();
+    const entry = players[interaction.user.id];
+
+    if (!entry?.chessUsername) {
+      await interaction.reply({
+        content: "You are not registered yet. Use `/setchess <username>`.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    await interaction.reply({
+      content: `Your saved Chess.com username is: **${entry.chessUsername}**`,
+      ephemeral: true,
+    });
+    return;
+  }
 
   if (interaction.commandName === "leaderboard") {
     if (!checkAndSetCooldown(interaction.user.id)) {
@@ -276,6 +330,7 @@ client.on("interactionCreate", async (interaction) => {
     await interaction.deferReply({ ephemeral: true });
     await refreshLeaderboardMessage(client, LEADERBOARD_CHANNEL_ID || interaction.channelId);
     await interaction.deleteReply();
+    return;
   }
 });
 
