@@ -1,0 +1,9 @@
+# Secrets
+.env
+
+# Runtime state
+players.json
+leaderboard_state.json
+
+# Dependencies
+node_modules/
