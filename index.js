@@ -78,11 +78,11 @@ async function getRapidRating(username) {
   }
 }
 
-function medal(i) {
+function rankPrefix(i) {
   if (i === 0) return "🥇";
   if (i === 1) return "🥈";
   if (i === 2) return "🥉";
-  return "▫️";
+  return `${i + 1}.`;
 }
 
 function formatEloDelta(delta) {
@@ -119,7 +119,7 @@ function buildLeaderboardEmbed(rows) {
     if (r.weeklyDeltaText) parts.push(r.weeklyDeltaText);
 
     const suffix = parts.length ? ` · ${parts.join(" · ")}` : "";
-    return `${medal(i)} **${r.discordTag}** -> ${r.chessUsername} (**${ratingText}**)${suffix}`;
+    return `${rankPrefix(i)} **${r.discordTag}** -> ${r.chessUsername} (**${ratingText}**)${suffix}`;
   });
 
   embed.setDescription(lines.join("\n").slice(0, 3800));
@@ -150,7 +150,7 @@ async function refreshLeaderboardMessage(client, channelId, opts = {}) {
 
   const prevRatings = state.lastRatings || {};
   const weeklyBaseline = state.weeklyBaselineRatings || {};
-  const prevRanks = state.lastRanks || {}; // norm -> rank (1-based)
+  const prevRanks = state.lastRanks || {}; 
 
   const rowsBase = await Promise.all(
     Object.entries(players).map(async ([id, p]) => ({
